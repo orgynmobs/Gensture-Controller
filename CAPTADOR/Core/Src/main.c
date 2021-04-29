@@ -43,7 +43,7 @@
 #define PWR_MGMT_1_REG 0x6B
 #define WHO_AM_I_REG 0x75
 
-
+//valores en RAW temporales de GYRO Y ACCEL
 int16_t Accel_X_RAW = 0;
 int16_t Accel_Y_RAW = 0;
 int16_t Accel_Z_RAW = 0;
@@ -51,16 +51,33 @@ int16_t Accel_Z_RAW = 0;
 int16_t Gyro_X_RAW = 0;
 int16_t Gyro_Y_RAW = 0;
 int16_t Gyro_Z_RAW = 0;
-
+//valores del las salidas de las medidas
 float Ax, Ay, Az, Gx, Gy, Gz;
-float gyro_y,gyro_x,gyro_z;
-float accel_x,accel_y,accel_z;
+// datos en valores de graved y velocidad para MPU1 1
+float Ax1, Ay1, Az1, Gx1, Gy1, Gz1;
+//datos en valores de graved y velocidad para MPU1 2
+float Ax2, Ay2, Az2, Gx2, Gy2, Gz2;
+
+//angulos reales MPU 1
+float gyro_y1,gyro_x1,gyro_z1;
+//angulos reales MPU 2
+float gyro_y2,gyro_x2,gyro_z2;
+//aceleraciones reales Mpu 1
+float accel_x1,accel_y1,accel_z1;
+//aceleraciones reales mpu 2
+float accel_x2,accel_y2,accel_z2;
+
+
+
+//salidas procesadas
 float angulo_y,angulo_x;
-int offy;
+float angulo_y2,angulo_x2;
 char palabra[32];
+char palabra2[32];
+//integradores
 uint32_t time;
 uint32_t dt;
-
+//kalman
 int X, X_estimate;
 float ADC_val;  // valor de lectura real
 /* USER CODE END PD */
@@ -98,16 +115,17 @@ static void MX_I2C2_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-int MPU6050_Init (void)
+int MPU6050_Init (I2C_HandleTypeDef hi2c)
 {
 	uint8_t check;
 		uint8_t Data;
 
 		// check device ID WHO_AM_I
 		Data = 0;
-		HAL_I2C_Mem_Write(&hi2c1, MPU6050_ADDR, PWR_MGMT_1_REG, 1,&Data, 1, 1000);
+		check= 0;
+		HAL_I2C_Mem_Write(&hi2c, MPU6050_ADDR, PWR_MGMT_1_REG, 1,&Data, 1, 1000);
 
-		HAL_I2C_Mem_Read (&hi2c1, MPU6050_ADDR,WHO_AM_I_REG,1, &check, 1, 1000);
+		HAL_I2C_Mem_Read (&hi2c, MPU6050_ADDR,WHO_AM_I_REG,1, &check, 1, 1000);
 
 		if (check == 104)  // 0x68 will be returned by the sensor if everything goes well
 		{
@@ -116,29 +134,29 @@ int MPU6050_Init (void)
 
 			// Set DATA RATE of 1KHz by writing SMPLRT_DIV register
 			Data = 0x07;
-			HAL_I2C_Mem_Write(&hi2c1, MPU6050_ADDR, SMPLRT_DIV_REG, 1, &Data, 1, 1000);
+			HAL_I2C_Mem_Write(&hi2c, MPU6050_ADDR, SMPLRT_DIV_REG, 1, &Data, 1, 1000);
 
 			// Set accelerometer configuration in ACCEL_CONFIG Register
 			// XA_ST=0,YA_ST=0,ZA_ST=0, FS_SEL=0 -> ± 2g
 			Data = 0x00;
-			HAL_I2C_Mem_Write(&hi2c1, MPU6050_ADDR, ACCEL_CONFIG_REG, 1, &Data, 1, 1000);
+			HAL_I2C_Mem_Write(&hi2c, MPU6050_ADDR, ACCEL_CONFIG_REG, 1, &Data, 1, 1000);
 
 			// Set Gyroscopic configuration in GYRO_CONFIG Register
 			// XG_ST=0,YG_ST=0,ZG_ST=0, FS_SEL=0 -> ± 250 °/s
 			Data = 0x00;
-			HAL_I2C_Mem_Write(&hi2c1, MPU6050_ADDR, GYRO_CONFIG_REG, 1, &Data, 1, 1000);
+			HAL_I2C_Mem_Write(&hi2c, MPU6050_ADDR, GYRO_CONFIG_REG, 1, &Data, 1, 1000);
 			return 1;
 		}
  return 0;
 	}
 
-void MPU6050_Read_Accel (void)
+void MPU6050_Read_Accel (I2C_HandleTypeDef hi2c)
 {
 	uint8_t Rec_Data[6];
 
 	// Read 6 BYTES of data starting from ACCEL_XOUT_H register
 
-	HAL_I2C_Mem_Read (&hi2c1, MPU6050_ADDR, ACCEL_XOUT_H_REG, 1, Rec_Data, 6, 1000);
+	HAL_I2C_Mem_Read (&hi2c, MPU6050_ADDR, ACCEL_XOUT_H_REG, 1, Rec_Data, 6, 1000);
 
 	Accel_X_RAW = (int16_t)(Rec_Data[0] << 8 | Rec_Data [1]);
 	Accel_Y_RAW = (int16_t)(Rec_Data[2] << 8 | Rec_Data [3]);
@@ -155,13 +173,14 @@ void MPU6050_Read_Accel (void)
 }
 
 
-void MPU6050_Read_Gyro (void)
+void MPU6050_Read_Gyro (I2C_HandleTypeDef hi2c)
 {
+
 	uint8_t Rec_Data[6];
 
 	// Read 6 BYTES of data starting from GYRO_XOUT_H register
 
-	HAL_I2C_Mem_Read (&hi2c1, MPU6050_ADDR, GYRO_XOUT_H_REG, 1, Rec_Data, 6, 1000);
+	HAL_I2C_Mem_Read (&hi2c, MPU6050_ADDR, GYRO_XOUT_H_REG, 1, Rec_Data, 6, 1000);
 
 	Gyro_X_RAW = (int16_t)(Rec_Data[0] << 8 | Rec_Data [1]);
 	Gyro_Y_RAW = (int16_t)(Rec_Data[2] << 8 | Rec_Data [3]);
@@ -175,17 +194,12 @@ void MPU6050_Read_Gyro (void)
 	Gx = Gyro_X_RAW/131.0;
 	Gy = Gyro_Y_RAW/131.0;
 	Gz = Gyro_Z_RAW/131.0;
-}
-
-uint8_t off_gy;
-void getoffset(void){
 
 
 }
 
-void setoffset(uint8_t value){
 
-}
+
 /* USER CODE END 0 */
 
 /**
@@ -196,7 +210,7 @@ int main(void)
 {
   /* USER CODE BEGIN 1 */
 int start = 0;
-off_gy= 0;
+
 
 
 //valores stadisticos
@@ -256,7 +270,7 @@ HAL_UART_Transmit(&huart5, timer, sizeof(timer), HAL_MAX_DELAY);
   while (1)
   {
 	while(start == 0){
-		 start = MPU6050_Init();
+		 start = MPU6050_Init(hi2c2) && MPU6050_Init(hi2c1);
 /*		 char clear[] = "CLEARDATA";
 		 char columns[] = "LABEL,Gx,Gy,Gz,Ax,Ay,Az";
 		 char timer [] ="RESETTIMER";
@@ -270,20 +284,49 @@ HAL_UART_Transmit(&huart5, timer, sizeof(timer), HAL_MAX_DELAY);
 	  // read the Accelerometer and Gyro values and tranform into angles
 
 
-	 	  MPU6050_Read_Accel();
-	 	  MPU6050_Read_Gyro();
-accel_x= atan(Ay/sqrt(pow(Ax,2) + pow(Az,2)))*(180.0/3.14);
-accel_y=atan(-Ax/sqrt(pow(Ay,2) + pow(Az,2)))*(180.0/3.14);
+	// 	  MPU6050_Read_Accel(hi2c2,Ax1,Ay1,Az1); // error AL asignar? proque no coge las void
+		  MPU6050_Read_Accel(hi2c2);
+
+		  Ax1 = Ax;
+		  Ay1 = Ay;
+		  Az1 = Az;
+		  MPU6050_Read_Accel(hi2c1);
+			Ax2 = Ax;
+			Ay2 = Ay;
+			 Az2 = Az;
+
+	 	  MPU6050_Read_Gyro(hi2c2);
+	 	  Gx1 = Gx;
+	 	  Gy1 = Gy;
+	 	  Gz1 = Gz;
+	 	 MPU6050_Read_Gyro(hi2c1);
+	 		 	  Gx2 = Gx;
+	 		 	  Gy2 = Gy;
+	 		 	  Gz2 = Gz;
+
+accel_x1= atan(Ay1/sqrt(pow(Ax1,2) + pow(Az1,2)))*(180.0/3.14);
+accel_y1=atan(-Ax1/sqrt(pow(Ay1,2) + pow(Az1,2)))*(180.0/3.14);
+
+accel_x2= atan(Ay2/sqrt(pow(Ax2,2) + pow(Az2,2)))*(180.0/3.14);
+accel_y2=atan(-Ax2/sqrt(pow(Ay2,2) + pow(Az2,2)))*(180.0/3.14);
 
 	  dt =  HAL_GetTick()-time;
 	  time = HAL_GetTick();
-	 	gyro_y += dt*(Gy-2.579)/1000;
-	 	gyro_x += dt*(Gx-0.3)/1000;
-	 	gyro_z += dt*(Gz)/1000;
+	 	gyro_y1 += dt*(Gy1-2.579)/1000;
+	 	gyro_x1 += dt*(Gx1-0.3)/1000;
+	 	gyro_z1 += dt*(Gz1)/1000;
+
+	 	gyro_y2 += dt*(Gy2-2.579)/1000;
+	 	gyro_x2 += dt*(Gx2-0.3)/1000;
+	 	gyro_z2 += dt*(Gz2)/1000;
 
 
-angulo_y = 0.01*(accel_y) + 0.9*gyro_y;
-angulo_x = 0.01*(accel_x) + 0.9*gyro_x;
+
+angulo_y = 0.01*(accel_y1) + 0.9*gyro_y1;
+angulo_x = 0.01*(accel_x1) + 0.9*gyro_x1;
+
+angulo_y2 = 0.01*(accel_y2) + 0.9*gyro_y2;
+angulo_x2 = 0.01*(accel_x2) + 0.9*gyro_x2;
 
 //ADC read
 
@@ -304,6 +347,7 @@ HAL_ADC_Start(&hadc1);
 
 //UART
 		 	 gcvt(angulo_x,10,palabra);
+		 	 gcvt(angulo_x2,10,palabra2);
 		 	  itoa(X_estimate,info_kalman,10);
 		 	  itoa(ADC_val,info_real,10);
 		 	 HAL_UART_Transmit(&huart5, (uint8_t*)info_real, sizeof(int), 100);
@@ -311,6 +355,8 @@ HAL_ADC_Start(&hadc1);
 		 	 HAL_UART_Transmit(&huart5, (uint8_t*)info_kalman, sizeof(int), 100);
 		 	HAL_UART_Transmit(&huart5, (uint8_t*)comma, sizeof(comma), 100);
 		 	HAL_UART_Transmit(&huart5,(uint8_t*)palabra,sizeof(float ), 100);//palabra
+		 	HAL_UART_Transmit(&huart5, (uint8_t*)comma, sizeof(comma), 100);
+			HAL_UART_Transmit(&huart5,(uint8_t*)palabra2,sizeof(float ), 100);//palabra
 		 	 HAL_UART_Transmit(&huart5, (uint8_t*)ln, sizeof(comma), 100);
 
 /*
