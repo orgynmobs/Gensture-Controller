@@ -43,6 +43,39 @@
 #define PWR_MGMT_1_REG 0x6B
 #define WHO_AM_I_REG 0x75
 
+
+
+
+//Definición esttructuras
+typedef struct {
+	float Gx;
+	float Gy;
+	float Gz;
+}Gyro;
+
+typedef struct{
+	float Ax;
+	float Ay;
+	float Az;
+} Accel;
+
+
+ typedef struct {
+	 int hi2c;
+	 Gyro MPUgyro;
+	 Accel MPUaccel;
+	 float offsetx;
+	 float offsetY;
+}MPU6050;
+
+
+
+
+
+
+MPU6050 mpu1,mpu2;
+
+
 //valores en RAW temporales de GYRO Y ACCEL
 int16_t Accel_X_RAW = 0;
 int16_t Accel_Y_RAW = 0;
@@ -150,9 +183,15 @@ int MPU6050_Init (I2C_HandleTypeDef hi2c)
  return 0;
 	}
 
-void MPU6050_Read_Accel (I2C_HandleTypeDef hi2c)
+Accel MPU6050_Read_Accel (int selector)
 {
 	uint8_t Rec_Data[6];
+Accel lectura;
+
+I2C_HandleTypeDef hi2c;
+
+if (selector == 1) hi2c = hi2c1;
+if (selector == 2) hi2c = hi2c2;
 
 	// Read 6 BYTES of data starting from ACCEL_XOUT_H register
 
@@ -167,17 +206,21 @@ void MPU6050_Read_Accel (I2C_HandleTypeDef hi2c)
 	     I have configured FS_SEL = 0. So I am dividing by 16384.0
 	     for more details check ACCEL_CONFIG Register              ****/
 
-	Ax = Accel_X_RAW/16384.0;
-	Ay = Accel_Y_RAW/16384.0;
-	Az = Accel_Z_RAW/16384.0;
+	lectura.Ax = Accel_X_RAW/16384.0;
+	lectura.Ay = Accel_Y_RAW/16384.0;
+	lectura.Az = Accel_Z_RAW/16384.0;
+	return lectura;
 }
 
 
-void MPU6050_Read_Gyro (I2C_HandleTypeDef hi2c)
+Gyro MPU6050_Read_Gyro (int selector)
 {
-
+Gyro lectura;
 	uint8_t Rec_Data[6];
+	I2C_HandleTypeDef hi2c;
 
+	if (selector == 1) hi2c = hi2c1;
+	if (selector == 2) hi2c = hi2c2;
 	// Read 6 BYTES of data starting from GYRO_XOUT_H register
 
 	HAL_I2C_Mem_Read (&hi2c, MPU6050_ADDR, GYRO_XOUT_H_REG, 1, Rec_Data, 6, 1000);
@@ -191,11 +234,11 @@ void MPU6050_Read_Gyro (I2C_HandleTypeDef hi2c)
 	     I have configured FS_SEL = 0. So I am dividing by 131.0
 	     for more details check GYRO_CONFIG Register              ****/
 
-	Gx = Gyro_X_RAW/131.0;
-	Gy = Gyro_Y_RAW/131.0;
-	Gz = Gyro_Z_RAW/131.0;
+	lectura.Gx = Gyro_X_RAW/131.0;
+	lectura.Gy = Gyro_Y_RAW/131.0;
+	lectura.Gz = Gyro_Z_RAW/131.0;
 
-
+return lectura;
 }
 
 
@@ -210,7 +253,14 @@ int main(void)
 {
   /* USER CODE BEGIN 1 */
 int start = 0;
+mpu1.hi2c= 1;
+mpu2.hi2c= 2;
 
+mpu1.offsetY =  2.579;
+mpu1.offsetx =  0.3;
+
+mpu2.offsetY =  -3;
+mpu2.offsetx = 0;
 
 
 //valores stadisticos
@@ -270,7 +320,7 @@ HAL_UART_Transmit(&huart5, timer, sizeof(timer), HAL_MAX_DELAY);
   while (1)
   {
 	while(start == 0){
-		 start = MPU6050_Init(hi2c2) && MPU6050_Init(hi2c1);
+		 start = MPU6050_Init(hi2c1) && MPU6050_Init(hi2c2);
 /*		 char clear[] = "CLEARDATA";
 		 char columns[] = "LABEL,Gx,Gy,Gz,Ax,Ay,Az";
 		 char timer [] ="RESETTIMER";
@@ -285,40 +335,40 @@ HAL_UART_Transmit(&huart5, timer, sizeof(timer), HAL_MAX_DELAY);
 
 
 	// 	  MPU6050_Read_Accel(hi2c2,Ax1,Ay1,Az1); // error AL asignar? proque no coge las void
-		  MPU6050_Read_Accel(hi2c2);
+		 mpu2.MPUaccel = MPU6050_Read_Accel(mpu2.hi2c);
 
-		  Ax1 = Ax;
-		  Ay1 = Ay;
-		  Az1 = Az;
-		  MPU6050_Read_Accel(hi2c1);
-			Ax2 = Ax;
-			Ay2 = Ay;
-			 Az2 = Az;
+		 // Ax1 = Ax;
+		 // Ay1 = Ay;
+		 // Az1 = Az;
+		 mpu1.MPUaccel =  MPU6050_Read_Accel(mpu1.hi2c);
+			//Ax2 = Ax;
+		//	Ay2 = Ay;
+		//	 Az2 = Az;
 
-	 	  MPU6050_Read_Gyro(hi2c2);
-	 	  Gx1 = Gx;
-	 	  Gy1 = Gy;
-	 	  Gz1 = Gz;
-	 	 MPU6050_Read_Gyro(hi2c1);
-	 		 	  Gx2 = Gx;
-	 		 	  Gy2 = Gy;
-	 		 	  Gz2 = Gz;
+	 	mpu2.MPUgyro =   MPU6050_Read_Gyro(mpu2.hi2c);
+	 	//  Gx1 = Gx;
+	 	//  Gy1 = Gy;
+	 	//  Gz1 = Gz;
+	 	mpu1.MPUgyro = MPU6050_Read_Gyro(mpu1.hi2c);
+	 	//	 	  Gx2 = Gx;
+	 	//	 	  Gy2 = Gy;
+	 	//	 	  Gz2 = Gz;
 
-accel_x1= atan(Ay1/sqrt(pow(Ax1,2) + pow(Az1,2)))*(180.0/3.14);
-accel_y1=atan(-Ax1/sqrt(pow(Ay1,2) + pow(Az1,2)))*(180.0/3.14);
+accel_x1= atan(mpu1.MPUaccel.Ay/sqrt(pow(mpu1.MPUaccel.Ax,2) + pow(mpu1.MPUaccel.Az,2)))*(180.0/3.14);
+accel_y1=atan(-mpu1.MPUaccel.Ax/sqrt(pow(mpu1.MPUaccel.Ay,2) + pow(mpu1.MPUaccel.Az,2)))*(180.0/3.14);
 
-accel_x2= atan(Ay2/sqrt(pow(Ax2,2) + pow(Az2,2)))*(180.0/3.14);
-accel_y2=atan(-Ax2/sqrt(pow(Ay2,2) + pow(Az2,2)))*(180.0/3.14);
+accel_x2= atan(mpu2.MPUaccel.Ay/sqrt(pow(mpu2.MPUaccel.Ax,2) + pow(mpu2.MPUaccel.Az,2)))*(180.0/3.14);
+accel_y2=atan(-mpu2.MPUaccel.Ax/sqrt(pow(mpu2.MPUaccel.Ay,2) + pow(mpu2.MPUaccel.Az,2)))*(180.0/3.14);
 
 	  dt =  HAL_GetTick()-time;
 	  time = HAL_GetTick();
-	 	gyro_y1 += dt*(Gy1-2.579)/1000;
-	 	gyro_x1 += dt*(Gx1-0.3)/1000;
-	 	gyro_z1 += dt*(Gz1)/1000;
+	 	gyro_y1 += dt*(mpu1.MPUgyro.Gy-mpu1.offsetY)/1000;  //2.579
+	 	gyro_x1 += dt*(mpu1.MPUgyro.Gx-mpu1.offsetx)/1000;    //0.3
+	 	gyro_z1 += dt*(mpu1.MPUgyro.Gz)/1000;
 
-	 	gyro_y2 += dt*(Gy2-2.579)/1000;
-	 	gyro_x2 += dt*(Gx2-0.3)/1000;
-	 	gyro_z2 += dt*(Gz2)/1000;
+	 	gyro_y2 += dt*(mpu2.MPUgyro.Gy-mpu2.offsetY)/1000;
+	 	gyro_x2 += dt*(mpu2.MPUgyro.Gx-mpu2.offsetx)/1000;
+	 	gyro_z2 += dt*(mpu2.MPUgyro.Gz)/1000;
 
 
 
