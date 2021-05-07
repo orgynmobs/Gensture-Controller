@@ -44,9 +44,8 @@
 #define WHO_AM_I_REG 0x75
 
 
+// Definición esttructuras del programa
 
-
-//Definición esttructuras
 typedef struct {
 	float Gx;
 	float Gy;
@@ -59,7 +58,6 @@ typedef struct{
 	float Az;
 } Accel;
 
-
  typedef struct {
 	 int hi2c;
 	 Gyro MPUgyro;
@@ -68,28 +66,20 @@ typedef struct{
 	 float offsetY;
 }MPU6050;
 
-
-
-
-
+// definimos las dos variables usadas en main()
 
 MPU6050 mpu1,mpu2;
 
 
-//valores en RAW temporales de GYRO Y ACCEL
-int16_t Accel_X_RAW = 0;
-int16_t Accel_Y_RAW = 0;
-int16_t Accel_Z_RAW = 0;
 
-int16_t Gyro_X_RAW = 0;
-int16_t Gyro_Y_RAW = 0;
-int16_t Gyro_Z_RAW = 0;
+
+
 //valores del las salidas de las medidas
-float Ax, Ay, Az, Gx, Gy, Gz;
+//float Ax, Ay, Az, Gx, Gy, Gz;
 // datos en valores de graved y velocidad para MPU1 1
-float Ax1, Ay1, Az1, Gx1, Gy1, Gz1;
+//float Ax1, Ay1, Az1, Gx1, Gy1, Gz1;
 //datos en valores de graved y velocidad para MPU1 2
-float Ax2, Ay2, Az2, Gx2, Gy2, Gz2;
+//float Ax2, Ay2, Az2, Gx2, Gy2, Gz2;
 
 //angulos reales MPU 1
 float gyro_y1,gyro_x1,gyro_z1;
@@ -101,18 +91,35 @@ float accel_x1,accel_y1,accel_z1;
 float accel_x2,accel_y2,accel_z2;
 
 
-
 //salidas procesadas
 float angulo_y,angulo_x;
 float angulo_y2,angulo_x2;
 char palabra[32];
 char palabra2[32];
+char palabra3[32];
+
+
 //integradores
 uint32_t time;
 uint32_t dt;
-//kalman
+
+
+//kalman unidimensional
 int X, X_estimate;
-float ADC_val;  // valor de lectura real
+float ADC_val;
+
+
+//kalman para MPU
+float Q_angle = 0.001;
+float Q_bias = 0.003;
+float R_measure = 0.03;
+float bias = 0;
+float angle = 0;
+float rate = 0;
+float P[2][2];
+float KalmanAngle;
+
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -151,7 +158,7 @@ static void MX_I2C2_Init(void);
 int MPU6050_Init (I2C_HandleTypeDef hi2c)
 {
 	uint8_t check;
-		uint8_t Data;
+	uint8_t Data;
 
 		// check device ID WHO_AM_I
 		Data = 0;
@@ -186,12 +193,17 @@ int MPU6050_Init (I2C_HandleTypeDef hi2c)
 Accel MPU6050_Read_Accel (int selector)
 {
 	uint8_t Rec_Data[6];
-Accel lectura;
+	Accel lectura;
 
-I2C_HandleTypeDef hi2c;
+	//valores en RAW temporales de GYRO Y ACCEL
+	int16_t Accel_X_RAW = 0;
+	int16_t Accel_Y_RAW = 0;
+	int16_t Accel_Z_RAW = 0;
 
-if (selector == 1) hi2c = hi2c1;
-if (selector == 2) hi2c = hi2c2;
+	I2C_HandleTypeDef hi2c;
+
+	if (selector == 1) hi2c = hi2c1;
+	if (selector == 2) hi2c = hi2c2;
 
 	// Read 6 BYTES of data starting from ACCEL_XOUT_H register
 
@@ -215,9 +227,13 @@ if (selector == 2) hi2c = hi2c2;
 
 Gyro MPU6050_Read_Gyro (int selector)
 {
-Gyro lectura;
+	Gyro lectura;
 	uint8_t Rec_Data[6];
 	I2C_HandleTypeDef hi2c;
+
+	int16_t Gyro_X_RAW = 0;
+	int16_t Gyro_Y_RAW = 0;
+	int16_t Gyro_Z_RAW = 0;
 
 	if (selector == 1) hi2c = hi2c1;
 	if (selector == 2) hi2c = hi2c2;
@@ -239,6 +255,38 @@ Gyro lectura;
 	lectura.Gz = Gyro_Z_RAW/131.0;
 
 return lectura;
+}
+
+float KalmanMPU(float newAngle, float newRate, float dt){
+
+	//1
+	rate = newRate - bias;
+    angle += dt * rate;
+	//2
+    	P[0][0] += dt * (dt*P[1][1] - P[0][1] - P[1][0] + Q_angle);
+    	P[0][1] -= dt * P[1][1];
+    	P[1][0] -= dt * P[1][1];
+    	P[1][1] += Q_bias * dt;
+	 //3
+    	float S = P[0][0] + R_measure; // Estimate error
+    	float K[2]; // Kalman gain - This is a 2x1 vector
+    	K[0] = P[0][0] / S;
+    	K[1] = P[1][0] / S;
+     //4
+    	float y = newAngle - angle;
+        angle += K[0] * y;
+        bias += K[1] * y;
+     //5
+         float P00_temp = P[0][0];
+         float P01_temp = P[0][1];
+
+         P[0][0] -= K[0] * P00_temp;
+         P[0][1] -= K[0] * P01_temp;
+         P[1][0] -= K[1] * P00_temp;
+         P[1][1] -= K[1] * P01_temp;
+
+return angle;
+
 }
 
 
@@ -319,40 +367,26 @@ HAL_UART_Transmit(&huart5, timer, sizeof(timer), HAL_MAX_DELAY);
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	while(start == 0){
+
+/* while(start == 0){
 		 start = MPU6050_Init(hi2c1) && MPU6050_Init(hi2c2);
-/*		 char clear[] = "CLEARDATA";
-		 char columns[] = "LABEL,Gx,Gy,Gz,Ax,Ay,Az";
-		 char timer [] ="RESETTIMER";
-
-		 HAL_UART_Transmit(&huart5, clear, sizeof(clear), HAL_MAX_DELAY);
-		 HAL_UART_Transmit(&huart5, columns, sizeof(columns), HAL_MAX_DELAY);
-		 HAL_UART_Transmit(&huart5, timer, sizeof(timer), HAL_MAX_DELAY);
+		}
 		 */
-	}
 
+	 MPU6050_Init(hi2c1);
+	 MPU6050_Init(hi2c2);
 	  // read the Accelerometer and Gyro values and tranform into angles
 
 
 	// 	  MPU6050_Read_Accel(hi2c2,Ax1,Ay1,Az1); // error AL asignar? proque no coge las void
-		 mpu2.MPUaccel = MPU6050_Read_Accel(mpu2.hi2c);
+	 mpu2.MPUaccel = MPU6050_Read_Accel(mpu2.hi2c);
 
-		 // Ax1 = Ax;
-		 // Ay1 = Ay;
-		 // Az1 = Az;
-		 mpu1.MPUaccel =  MPU6050_Read_Accel(mpu1.hi2c);
-			//Ax2 = Ax;
-		//	Ay2 = Ay;
-		//	 Az2 = Az;
+	 mpu1.MPUaccel =  MPU6050_Read_Accel(mpu1.hi2c);
 
-	 	mpu2.MPUgyro =   MPU6050_Read_Gyro(mpu2.hi2c);
-	 	//  Gx1 = Gx;
-	 	//  Gy1 = Gy;
-	 	//  Gz1 = Gz;
-	 	mpu1.MPUgyro = MPU6050_Read_Gyro(mpu1.hi2c);
-	 	//	 	  Gx2 = Gx;
-	 	//	 	  Gy2 = Gy;
-	 	//	 	  Gz2 = Gz;
+	 mpu2.MPUgyro =   MPU6050_Read_Gyro(mpu2.hi2c);
+
+	 mpu1.MPUgyro = MPU6050_Read_Gyro(mpu1.hi2c);
+
 
 accel_x1= atan(mpu1.MPUaccel.Ay/sqrt(pow(mpu1.MPUaccel.Ax,2) + pow(mpu1.MPUaccel.Az,2)))*(180.0/3.14);
 accel_y1=atan(-mpu1.MPUaccel.Ax/sqrt(pow(mpu1.MPUaccel.Ay,2) + pow(mpu1.MPUaccel.Az,2)))*(180.0/3.14);
@@ -362,6 +396,7 @@ accel_y2=atan(-mpu2.MPUaccel.Ax/sqrt(pow(mpu2.MPUaccel.Ay,2) + pow(mpu2.MPUaccel
 
 	  dt =  HAL_GetTick()-time;
 	  time = HAL_GetTick();
+
 	 	gyro_y1 += dt*(mpu1.MPUgyro.Gy-mpu1.offsetY)/1000;  //2.579
 	 	gyro_x1 += dt*(mpu1.MPUgyro.Gx-mpu1.offsetx)/1000;    //0.3
 	 	gyro_z1 += dt*(mpu1.MPUgyro.Gz)/1000;
@@ -375,21 +410,25 @@ accel_y2=atan(-mpu2.MPUaccel.Ax/sqrt(pow(mpu2.MPUaccel.Ay,2) + pow(mpu2.MPUaccel
 angulo_y = 0.01*(accel_y1) + 0.9*gyro_y1;
 angulo_x = 0.01*(accel_x1) + 0.9*gyro_x1;
 
+KalmanAngle = KalmanMPU(accel_x1, mpu1.MPUgyro.Gx, dt);
+
+
 angulo_y2 = 0.01*(accel_y2) + 0.9*gyro_y2;
 angulo_x2 = 0.01*(accel_x2) + 0.9*gyro_x2;
+
+
 
 //ADC read
 
 P_previa =  P;
 
-
-	 	  Kalman = P/(P+var);
-
+	Kalman = P/(P+var);
 
 HAL_ADC_Start(&hadc1);
 	 if(HAL_ADC_PollForConversion(&hadc1,HAL_MAX_DELAY)==HAL_OK){
 		 ADC_val=HAL_ADC_GetValue(&hadc1) ;  // entre 2500 y 1500 . quzás ajusatble tocando la resolucion
-	 }
+	   }
+
 	 X_estimate = X + Kalman*(ADC_val-X);
 		 	  P = (1-Kalman)*P_previa + fabs(X - X_estimate)*0.01;
 		 	  X = X_estimate;
@@ -397,16 +436,19 @@ HAL_ADC_Start(&hadc1);
 
 //UART
 		 	 gcvt(angulo_x,10,palabra);
-		 	 gcvt(angulo_x2,10,palabra2);
+		 	 gcvt(KalmanAngle,10,palabra2);
+		 	 gcvt(angulo_x2,10,palabra3);
 		 	  itoa(X_estimate,info_kalman,10);
 		 	  itoa(ADC_val,info_real,10);
-		 	 HAL_UART_Transmit(&huart5, (uint8_t*)info_real, sizeof(int), 100);
-		 	 HAL_UART_Transmit(&huart5, (uint8_t*)comma, sizeof(comma), 100);
-		 	 HAL_UART_Transmit(&huart5, (uint8_t*)info_kalman, sizeof(int), 100);
-		 	HAL_UART_Transmit(&huart5, (uint8_t*)comma, sizeof(comma), 100);
-		 	HAL_UART_Transmit(&huart5,(uint8_t*)palabra,sizeof(float ), 100);//palabra
+		 //	HAL_UART_Transmit(&huart5, (uint8_t*)info_real, sizeof(int), 100);
+		 //	 HAL_UART_Transmit(&huart5, (uint8_t*)comma, sizeof(comma), 100);
+		  HAL_UART_Transmit(&huart5, (uint8_t*)info_kalman, sizeof(int), 100);
+		 //	HAL_UART_Transmit(&huart5, (uint8_t*)comma, sizeof(comma), 100);
+		 //	HAL_UART_Transmit(&huart5,(uint8_t*)palabra,sizeof(float ), 100);//palabra
 		 	HAL_UART_Transmit(&huart5, (uint8_t*)comma, sizeof(comma), 100);
 			HAL_UART_Transmit(&huart5,(uint8_t*)palabra2,sizeof(float ), 100);//palabra
+		//	HAL_UART_Transmit(&huart5, (uint8_t*)comma, sizeof(comma), 100);
+		//	HAL_UART_Transmit(&huart5,(uint8_t*)palabra3,sizeof(float ), 100);
 		 	 HAL_UART_Transmit(&huart5, (uint8_t*)ln, sizeof(comma), 100);
 
 /*
@@ -422,10 +464,9 @@ HAL_UART_Transmit(&huart5,&espacio,sizeof(espacio ), 100);
 */
 
 
-//__HAL_TIM_SET_COMPARE(&htim4,TIM_CHANNEL_1,(angulo_y*200/180)+50);
 
 
-//HAL_Delay(100);
+
 
 
     /* USER CODE END WHILE */
